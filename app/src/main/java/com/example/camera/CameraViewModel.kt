@@ -7,6 +7,9 @@ import androidx.camera.view.PreviewView
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.viewModelScope
+import com.example.detection.DetectionDiagnostics
+import com.example.detection.PerceptionState
+import com.example.detection.ScenePerceptionManager
 import com.example.guidance.CreativeIntention
 import com.example.guidance.GuidanceMode
 import com.example.guidance.GuidanceSettings
@@ -16,6 +19,7 @@ import com.example.sensors.DeviceOrientationManager
 import com.example.sensors.OrientationState
 import com.example.subject.SubjectPoint
 import com.example.subject.SubjectSelectionManager
+import com.example.subject.SubjectSelectionSource
 import com.example.subject.SubjectSelectionState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -41,10 +45,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val captureManager = CameraCaptureManager(application)
     val subjectSelectionManager = SubjectSelectionManager()
     val orientationManager = DeviceOrientationManager(application)
+    val scenePerceptionManager = ScenePerceptionManager(application)
 
     val hardwareState: StateFlow<CameraHardwareState> = cameraManager.hardwareState
     val subjectState: StateFlow<SubjectSelectionState> = subjectSelectionManager.selectionState
     val orientationState: StateFlow<OrientationState> = orientationManager.orientation
+    val perceptionState: StateFlow<PerceptionState> = scenePerceptionManager.perceptionState
+    val diagnostics: StateFlow<DetectionDiagnostics> = scenePerceptionManager.diagnostics
 
     private val _settings = MutableStateFlow(GuidanceSettings())
     val settings: StateFlow<GuidanceSettings> = _settings.asStateFlow()
@@ -75,7 +82,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun bindCameraPreview(lifecycleOwner: LifecycleOwner, previewView: PreviewView) {
-        cameraManager.bindCamera(lifecycleOwner, previewView, hardwareState.value.currentLens)
+        cameraManager.bindCamera(
+            lifecycleOwner = lifecycleOwner,
+            previewView = previewView,
+            lensFacing = hardwareState.value.currentLens,
+            onFrameAnalyzed = { bitmap ->
+                scenePerceptionManager.onImageFrameAvailable(bitmap)
+            }
+        )
     }
 
     fun toggleCameraLens(lifecycleOwner: LifecycleOwner, previewView: PreviewView) {
@@ -84,7 +98,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         } else {
             CameraSelector.LENS_FACING_BACK
         }
-        cameraManager.bindCamera(lifecycleOwner, previewView, nextLens)
+        cameraManager.bindCamera(
+            lifecycleOwner = lifecycleOwner,
+            previewView = previewView,
+            lensFacing = nextLens,
+            onFrameAnalyzed = { bitmap ->
+                scenePerceptionManager.onImageFrameAvailable(bitmap)
+            }
+        )
     }
 
     fun cycleFlash() {
@@ -97,24 +118,61 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun handlePreviewTouch(x: Float, y: Float, viewWidth: Float, viewHeight: Float, previewView: PreviewView?) {
-        // Enregistrer la sélection manuelle du sujet
-        subjectSelectionManager.selectTouchPoint(x, y, viewWidth, viewHeight)
+        val normX = (x / viewWidth).coerceIn(0f, 1f)
+        val normY = (y / viewHeight).coerceIn(0f, 1f)
 
-        // Déclencher également l'autofocus matériel CameraX
+        // 1. Déclencher également l'autofocus et l'exposition matériel CameraX
         previewView?.let { view ->
             val factory = view.meteringPointFactory
             val point = factory.createPoint(x, y)
             cameraManager.focusAt(point)
         }
 
-        val normX = (x / viewWidth).coerceIn(0f, 1f)
-        val normY = (y / viewHeight).coerceIn(0f, 1f)
-        showFeedback(String.format("Point focal fixé (%.2f, %.2f)", normX, normY))
+        // 2. Vérifier si le toucher correspond à un objet détecté par le moteur de vision
+        val touchedObject = scenePerceptionManager.handleTouchSelection(normX, normY)
+        if (touchedObject != null) {
+            subjectSelectionManager.setNormalizedPoint(
+                touchedObject.normalizedCenterX,
+                touchedObject.normalizedCenterY,
+                SubjectSelectionSource.MANUAL_TOUCH
+            )
+            showFeedback("Sujet fixé : ${touchedObject.label} (${touchedObject.confidencePercent}%)")
+        } else {
+            // Toucher libre hors des objets détectés
+            subjectSelectionManager.selectTouchPoint(x, y, viewWidth, viewHeight)
+            showFeedback(String.format("Point focal fixé (%.2f, %.2f)", normX, normY))
+        }
     }
 
     fun clearSubjectSelection() {
+        scenePerceptionManager.clearSelection()
         subjectSelectionManager.clearSelection()
-        showFeedback("Sélection de sujet effacée")
+        showFeedback("Sélection de sujet réinitialisée")
+    }
+
+    fun unlockSubject() {
+        scenePerceptionManager.unlockSubject()
+        subjectSelectionManager.clearSelection()
+        showFeedback("Sujet déverrouillé · Suivi automatique rétabli")
+    }
+
+    fun toggleDetectionDisplayMode(): com.example.detection.DetectionDisplayMode {
+        val newMode = scenePerceptionManager.toggleDisplayMode()
+        _settings.update { it.copy(displayMode = newMode) }
+        val modeLabel = if (newMode == com.example.detection.DetectionDisplayMode.ESSENTIAL) "Essentiel" else "Diagnostic"
+        showFeedback("Affichage détection : $modeLabel")
+        return newMode
+    }
+
+    fun setDetectionDisplayMode(mode: com.example.detection.DetectionDisplayMode) {
+        scenePerceptionManager.setDisplayMode(mode)
+        _settings.update { it.copy(displayMode = mode) }
+    }
+
+    fun toggleDiagnostics() {
+        _settings.update { it.copy(showDiagnostics = !it.showDiagnostics) }
+        val status = if (_settings.value.showDiagnostics) "activé" else "masqué"
+        showFeedback("Diagnostic télémétrique $status")
     }
 
     fun setGuidanceMode(mode: GuidanceMode) {
@@ -214,6 +272,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     override fun onCleared() {
         super.onCleared()
+        cameraManager.release()
+        scenePerceptionManager.close()
         orientationManager.stopListening()
     }
 }

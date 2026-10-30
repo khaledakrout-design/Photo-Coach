@@ -162,7 +162,7 @@ fun GuidedModeControlsPanel(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 210.dp)
+                    .heightIn(max = 185.dp)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 14.dp, vertical = 6.dp)
             ) {
@@ -318,7 +318,7 @@ fun GuidedModeControlsPanel(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Repères de cadrage actifs • Assistant IA en cours de développement (Jalon 2)",
+                        text = "Moteur visuel local actif • Cadrage selon catégorie & intention",
                         color = TextSecondary,
                         fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace,

@@ -73,6 +73,7 @@ class MainActivity : ComponentActivity() {
                             settings = currentSettings,
                             onToggleRuleOfThirds = { cameraViewModel.toggleRuleOfThirds() },
                             onToggleHorizonLevel = { cameraViewModel.toggleHorizonLevel() },
+                            onToggleDiagnostics = { cameraViewModel.toggleDiagnostics() },
                             onNavigateBack = { currentScreen = AppScreen.HOME },
                             modifier = Modifier.fillMaxSize()
                         )

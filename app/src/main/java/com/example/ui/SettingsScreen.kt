@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Height
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -74,6 +75,8 @@ fun SettingsScreen(
     settings: GuidanceSettings,
     onToggleRuleOfThirds: () -> Unit,
     onToggleHorizonLevel: () -> Unit,
+    onToggleDiagnostics: () -> Unit = {},
+    onToggleDetectionDisplayMode: () -> Unit = {},
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -153,6 +156,59 @@ fun SettingsScreen(
                 checked = settings.showHorizonLevel,
                 onCheckedChange = { onToggleHorizonLevel() },
                 testTag = "setting_switch_horizon"
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Section 2 : Perception de scène locale & Précision (Jalon 2.1)
+            Text(
+                text = "PERCEPTION DE SCÈNE LOCALE (JALON 2.1)",
+                color = CyanAccent,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.2.sp
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Bascule Mode Essentiel vs Diagnostic
+            val isDiagnosticMode = settings.displayMode == com.example.detection.DetectionDisplayMode.DIAGNOSTIC
+            SettingToggleItem(
+                icon = Icons.Default.Speed,
+                title = "Mode Diagnostic de perception",
+                subtitle = if (isDiagnosticMode) "Actif : Toutes détections, latence ms, FPS, mémoire et pourcentages" else "Inactif : Mode Essentiel épuré avec sujet principal en cyan et étiquettes compactes",
+                checked = isDiagnosticMode,
+                onCheckedChange = { onToggleDetectionDisplayMode() },
+                testTag = "setting_switch_display_mode"
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Switch Télémétrie diagnostique HUD
+            SettingToggleItem(
+                icon = Icons.Default.Speed,
+                title = "Bannière télémétrique HUD",
+                subtitle = "Afficher la latence (ms), le taux de rafraîchissement (FPS) et la mémoire",
+                checked = settings.showDiagnostics,
+                onCheckedChange = { onToggleDiagnostics() },
+                testTag = "setting_switch_diagnostics"
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Explication des seuils de confiance (Jalon 2.1 Section 1)
+            InfoItemCard(
+                icon = Icons.Default.CenterFocusStrong,
+                title = "Gestion intelligente de la confiance",
+                description = "• Haute confiance (≥ 70%) : Boîtes nettes et étiquettes priorisées.\n• Moyenne confiance (45% à 69%) : Contours adoucis sans surcharge.\n• Faible confiance (< 45%) : Filtré automatiquement en mode Essentiel."
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            InfoItemCard(
+                icon = Icons.Default.CenterFocusStrong,
+                title = "Verrouillage de sujet (🔒) & Hystérésis",
+                description = "Touchez n'importe quel objet pour le verrouiller. Un mécanisme d'hystérésis (Δ=0.12) empêche le papillonnement automatique entre deux sujets d'importance équivalente."
             )
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -257,10 +313,10 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "• Moteur CameraX natif sur Android (zéro simulation, flux vidéo temps réel).\n" +
+                        text = "• Moteur CameraX natif sur Android (flux vidéo temps réel 60 FPS).\n" +
                                "• Télémétrie inertielle SensorManager avec filtrage passe-bas.\n" +
-                               "• Coordonnées normalisées [0..1] prêtes pour l'intégration de la vision locale.\n" +
-                               "• Jalon 02 à venir : intégration de l'analyseur de scène sur l'appareil (sans cloud, sans backend).",
+                               "• Jalon 02 actif : Moteur de vision MediaPipe Tasks Vision avec modèle EfficientDet-Lite0 quantifié int8 embarqué en local (100% sur l'appareil, 0 API cloud).\n" +
+                               "• Suivi temporel des objets, lissage des coordonnées et sélection heuristique du sujet principal.",
                         color = TextSecondary,
                         fontSize = 11.sp,
                         lineHeight = 16.sp

@@ -18,6 +18,15 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.suspendCancellableCoroutine
+import android.graphics.Bitmap
+import android.graphics.Matrix
+import android.os.SystemClock
+import android.util.Log
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
@@ -49,6 +58,11 @@ class CameraManager(private val context: Context) {
     private var camera: Camera? = null
     private var imageCapture: ImageCapture? = null
     private var preview: Preview? = null
+    private var imageAnalysis: ImageAnalysis? = null
+    private var analysisExecutor: ExecutorService? = null
+    private val isAnalyzing = AtomicBoolean(false)
+    private var lastAnalysisTimestampMs = 0L
+    private var adaptiveThrottleIntervalMs = 250L
 
     private val _hardwareState = MutableStateFlow(CameraHardwareState())
     val hardwareState: StateFlow<CameraHardwareState> = _hardwareState.asStateFlow()
@@ -72,7 +86,8 @@ class CameraManager(private val context: Context) {
     fun bindCamera(
         lifecycleOwner: LifecycleOwner,
         previewView: PreviewView,
-        lensFacing: Int = CameraSelector.LENS_FACING_BACK
+        lensFacing: Int = CameraSelector.LENS_FACING_BACK,
+        onFrameAnalyzed: ((Bitmap) -> Unit)? = null
     ) {
         _hardwareState.update { it.copy(isLoading = true, errorMessage = null) }
 
@@ -111,12 +126,71 @@ class CameraManager(private val context: Context) {
                 .build()
             imageCapture = captureUseCase
 
-            val boundCamera = provider.bindToLifecycle(
-                lifecycleOwner,
-                cameraSelector,
-                previewUseCase,
-                captureUseCase
-            )
+            // Configuration sécurisée de l'analyse d'image locale (CameraX ImageAnalysis)
+            val analysisUseCase = if (onFrameAnalyzed != null) {
+                analysisExecutor?.shutdown()
+                val executor = Executors.newSingleThreadExecutor()
+                analysisExecutor = executor
+
+                ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                    .build().also { analysis ->
+                        analysis.setAnalyzer(executor) { imageProxy ->
+                            val now = SystemClock.elapsedRealtime()
+                            // Throttling adaptatif pour préserver le CPU et la batterie
+                            if (now - lastAnalysisTimestampMs < adaptiveThrottleIntervalMs ||
+                                !isAnalyzing.compareAndSet(false, true)
+                            ) {
+                                imageProxy.close()
+                                return@setAnalyzer
+                            }
+
+                            lastAnalysisTimestampMs = now
+                            val startAnalysis = SystemClock.elapsedRealtime()
+                            try {
+                                val rawBitmap = imageProxy.toBitmap()
+                                val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+                                val orientedBitmap = if (rotationDegrees != 0) {
+                                    val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+                                    Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, matrix, true)
+                                } else {
+                                    rawBitmap
+                                }
+                                onFrameAnalyzed(orientedBitmap)
+
+                                val duration = SystemClock.elapsedRealtime() - startAnalysis
+                                // Régulation adaptative : espacer les analyses selon la latence mesurée (2-5 FPS cible)
+                                adaptiveThrottleIntervalMs = (duration * 2L).coerceIn(200L, 500L)
+                            } catch (e: Exception) {
+                                Log.e("CameraManager", "Erreur lors de l'extraction de l'image d'analyse: ${e.message}")
+                            } finally {
+                                imageProxy.close()
+                                isAnalyzing.set(false)
+                            }
+                        }
+                    }
+            } else {
+                null
+            }
+            imageAnalysis = analysisUseCase
+
+            val boundCamera = if (analysisUseCase != null) {
+                provider.bindToLifecycle(
+                    lifecycleOwner,
+                    cameraSelector,
+                    previewUseCase,
+                    captureUseCase,
+                    analysisUseCase
+                )
+            } else {
+                provider.bindToLifecycle(
+                    lifecycleOwner,
+                    cameraSelector,
+                    previewUseCase,
+                    captureUseCase
+                )
+            }
             camera = boundCamera
 
             // Observer l'état du zoom
@@ -195,5 +269,14 @@ class CameraManager(private val context: Context) {
             .setAutoCancelDuration(3, TimeUnit.SECONDS)
             .build()
         camera?.cameraControl?.startFocusAndMetering(action)
+    }
+
+    fun release() {
+        try {
+            cameraProvider?.unbindAll()
+            analysisExecutor?.shutdown()
+        } catch (e: Exception) {
+            Log.w("CameraManager", "Erreur lors de la libération des ressources: ${e.message}")
+        }
     }
 }
