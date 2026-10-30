@@ -1,0 +1,112 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+
+    <!-- Dark Lens Barrel Background -->
+    <path
+        android:fillColor="#16181D"
+        android:pathData="M60,60m-58,0a58,58 0,1 1,116 0a58,58 0,1 1,-116 0" />
+
+    <!-- Outer Precision Ring -->
+    <path
+        android:strokeColor="#2E3440"
+        android:strokeWidth="1.5"
+        android:fillColor="#00000000"
+        android:pathData="M60,60m-52,0a52,52 0,1 1,104 0a52,52 0,1 1,-104 0" />
+
+    <!-- Cyan Optical Ring -->
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="2.5"
+        android:fillColor="#00000000"
+        android:pathData="M60,60m-45,0a45,45 0,1 1,90 0a45,45 0,1 1,-90 0" />
+
+    <!-- Inner Shutter Chamber -->
+    <path
+        android:fillColor="#1E222B"
+        android:pathData="M60,60m-42,0a42,42 0,1 1,84 0a42,42 0,1 1,-84 0" />
+
+    <!-- Aperture Iris Blades (Geometrically constructed 6-blade iris) -->
+    <!-- Blade 1 -->
+    <path
+        android:fillColor="#2A303C"
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="1.2"
+        android:pathData="M60,18 L78,38 L54,46 L42,26 Z" />
+
+    <!-- Blade 2 -->
+    <path
+        android:fillColor="#252B36"
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="1.2"
+        android:pathData="M96,39 L96,65 L72,59 L78,38 Z" />
+
+    <!-- Blade 3 -->
+    <path
+        android:fillColor="#2A303C"
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="1.2"
+        android:pathData="M96,65 L78,92 L66,72 L72,59 Z" />
+
+    <!-- Blade 4 -->
+    <path
+        android:fillColor="#252B36"
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="1.2"
+        android:pathData="M78,92 L42,94 L48,74 L66,72 Z" />
+
+    <!-- Blade 5 -->
+    <path
+        android:fillColor="#2A303C"
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="1.2"
+        android:pathData="M42,94 L24,67 L48,61 L48,74 Z" />
+
+    <!-- Blade 6 -->
+    <path
+        android:fillColor="#252B36"
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="1.2"
+        android:pathData="M24,67 L39,36 L54,46 L48,61 Z" />
+
+    <!-- Central Aperture Opening (Hexagon pupil) -->
+    <path
+        android:fillColor="#0F1014"
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="1.5"
+        android:pathData="M54,46 L72,48 L78,65 L66,72 L48,67 L46,53 Z" />
+
+    <!-- Optical Focal Center -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M60,60m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0" />
+
+    <!-- Precision Crosshair Guides -->
+    <!-- Top Tick -->
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M60,4 L60,14" />
+    <!-- Bottom Tick -->
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M60,106 L60,116" />
+    <!-- Left Tick -->
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M4,60 L14,60" />
+    <!-- Right Tick -->
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M106,60 L116,60" />
+
+</vector>

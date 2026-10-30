@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">PHOTO COACH</string>
+    <string name="welcome_title">PHOTO COACH</string>
+    <string name="welcome_subtitle">Viseur photographique &amp; cadrage professionnel</string>
+    <string name="start_camera">Ouvrir l\'appareil photo</string>
+    <string name="mode_auto_title">Mode Automatique</string>
+    <string name="mode_auto_desc">Observation de scène et cadrage direct</string>
+    <string name="mode_guided_title">Mode Guidé</string>
+    <string name="mode_guided_desc">Accompagnement par catégorie et intention créative</string>
+    <string name="settings_title">Paramètres</string>
+    <string name="camera_permission_required">L\'accès à l\'appareil photo est nécessaire pour afficher le viseur et composer vos prises de vue.</string>
+    <string name="grant_permission">Autoriser l\'appareil photo</string>
+</resources>

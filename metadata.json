@@ -1,0 +1,6 @@
+{
+  "name": "PHOTO COACH",
+  "description": "Assistant photographique natif Android avec viseur professionnel et cadrage guidé.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
