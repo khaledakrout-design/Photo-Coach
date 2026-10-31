@@ -22,9 +22,13 @@ class ObjectTracker(
     private val activeTracks = mutableListOf<DetectedObject>()
 
     /**
-     * Supprime les détections redondantes/doublons du même objet physique (Non-Maximum Suppression).
+     * Supprime les détections redondantes/doublons du même objet physique (Non-Maximum Suppression et confinement).
+     * Préserve scrupuleusement les objets physiques distincts même avec le même label.
      */
-    fun suppressDuplicates(rawDetections: List<DetectedObject>): List<DetectedObject> {
+    fun suppressDuplicates(
+        rawDetections: List<DetectedObject>,
+        iouThreshold: Float = duplicateIouThreshold
+    ): List<DetectedObject> {
         if (rawDetections.size <= 1) return rawDetections
 
         val sorted = rawDetections.sortedByDescending { it.confidence }
@@ -34,10 +38,12 @@ class ObjectTracker(
             var isDuplicate = false
             for (accepted in result) {
                 val iou = computeIoU(candidate.rawBoundingBox, accepted.rawBoundingBox)
+                val containment = computeContainment(candidate.rawBoundingBox, accepted.rawBoundingBox)
                 val sameOrGenericLabel = candidate.label.equals(accepted.label, ignoreCase = true) ||
                         candidate.label.isBlank() || accepted.label.isBlank()
 
-                if (iou >= duplicateIouThreshold && sameOrGenericLabel) {
+                // Doublon si fort chevauchement IoU OU quasi-inclusion de la même classe
+                if ((iou >= iouThreshold || containment >= 0.85f) && sameOrGenericLabel) {
                     isDuplicate = true
                     break
                 }
@@ -47,6 +53,26 @@ class ObjectTracker(
             }
         }
         return result
+    }
+
+    /**
+     * Calcule le taux d'inclusion (surface d'intersection / surface minimale).
+     */
+    fun computeContainment(b1: RectF, b2: RectF): Float {
+        val interLeft = max(b1.left, b2.left)
+        val interTop = max(b1.top, b2.top)
+        val interRight = min(b1.right, b2.right)
+        val interBottom = min(b1.bottom, b2.bottom)
+
+        val interWidth = max(0f, interRight - interLeft)
+        val interHeight = max(0f, interBottom - interTop)
+        val interArea = interWidth * interHeight
+
+        val area1 = max(0f, b1.right - b1.left) * max(0f, b1.bottom - b1.top)
+        val area2 = max(0f, b2.right - b2.left) * max(0f, b2.bottom - b2.top)
+        val minArea = min(area1, area2)
+
+        return if (minArea > 0f) interArea / minArea else 0f
     }
 
     /**
@@ -79,11 +105,18 @@ class ObjectTracker(
                 val labelCompatible = labelMatch || detection.label.isBlank() || track.label.isBlank()
 
                 if (labelCompatible) {
+                    val detArea = detection.rawBoundingBox.width() * detection.rawBoundingBox.height()
+                    val trackArea = track.boundingBox.width() * track.boundingBox.height()
+                    val areaRatio = if (maxOf(detArea, trackArea) > 0f) minOf(detArea, trackArea) / maxOf(detArea, trackArea) else 1f
+
+                    // Si IoU est nul et que les surfaces diffèrent trop fortement, ne pas associer
+                    if (iou <= 0.02f && areaRatio < 0.25f) continue
+
                     // Formule d'association combinée : 65% IoU + 35% proximité du centre + bonus label
                     val spatialScore = (iou * 0.65f) + ((1f - (dist / 1.414f).coerceIn(0f, 1f)) * 0.35f)
                     val totalScore = if (labelMatch) spatialScore + 0.15f else spatialScore
 
-                    if (totalScore >= minMatchScore && (iou > 0.05f || dist < 0.30f)) {
+                    if (totalScore >= minMatchScore && (iou > 0.05f || dist < 0.28f)) {
                         matchCandidates.add(MatchCandidate(dIdx, tIdx, totalScore))
                     }
                 }
@@ -113,6 +146,7 @@ class ObjectTracker(
             val updatedTrack = detection.copy(
                 id = existingTrack.id,
                 trackingId = existingTrack.trackingId,
+                rawModelLabel = if (detection.rawModelLabel.isNotBlank()) detection.rawModelLabel else existingTrack.rawModelLabel,
                 rawBoundingBox = detection.rawBoundingBox,
                 boundingBox = smoothedBox,
                 consecutiveFrames = existingTrack.consecutiveFrames + 1,

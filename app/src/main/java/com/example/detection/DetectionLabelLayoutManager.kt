@@ -54,19 +54,24 @@ class DetectionLabelLayoutManager(
             return emptyList()
         }
 
-        // 1. Filtrer les objets à étiqueter selon le mode d'affichage
+        // 1. Filtrer les objets à étiqueter selon le mode d'affichage (Jalon 2.2.1)
         val candidates = when (displayMode) {
             DetectionDisplayMode.ESSENTIAL -> {
-                // En mode Essentiel : le sujet sélectionné en priorité absolue, puis au maximum
-                // les 2 objets secondaires les plus confiants (confiance >= MEDIUM)
+                // En mode Essentiel : le sujet sélectionné en priorité absolue.
+                // Objets secondaires : uniquement rôles pertinents (ni CONTEXT_OBJECT ni BACKGROUND_OBJECT),
+                // confiance >= MEDIUM, et maximum 2 étiquettes secondaires.
                 val selected = detectedObjects.filter { it.isSelectedSubject }
-                val secondary = detectedObjects.filter { !it.isSelectedSubject && it.confidenceTier != ConfidenceTier.LOW }
-                    .sortedByDescending { it.confidence }
-                    .take(max(0, maxLabelsInEssentialMode - selected.size))
+                val secondary = detectedObjects.filter {
+                    !it.isSelectedSubject &&
+                    it.confidenceTier != ConfidenceTier.LOW &&
+                    it.relevanceRole != ObjectRelevanceRole.CONTEXT_OBJECT &&
+                    it.relevanceRole != ObjectRelevanceRole.BACKGROUND_OBJECT
+                }.sortedByDescending { it.confidence }
+                 .take(2)
                 selected + secondary
             }
             DetectionDisplayMode.DIAGNOSTIC -> {
-                // En mode Diagnostic : étiquette pour toutes les détections valides (triées par sélection puis confiance)
+                // En mode Diagnostic : étiquettes pour toutes les détections valides (triées par sélection puis confiance)
                 detectedObjects.sortedWith(
                     compareByDescending<DetectedObject> { it.isSelectedSubject }
                         .thenByDescending { it.confidence }
@@ -88,79 +93,121 @@ class DetectionLabelLayoutManager(
             val labelText = if (displayMode == DetectionDisplayMode.ESSENTIAL) {
                 if (obj.isSelectedSubject) obj.displayLabelShort else obj.label
             } else {
-                obj.displayLabel
+                val trackSuffix = obj.trackingId?.let { " [#$it]" } ?: ""
+                "${obj.label}$trackSuffix · ${obj.confidencePercent}%"
             }
 
-            // Stratégies de placement successives :
-            // 1. Au-dessus de la boîte (stratégie préférée)
-            // 2. À l'intérieur haut de la boîte
-            // 3. En dessous de la boîte
-            // 4. Déport latéral avec ligne de liaison
+            // Options horizontales pour chaque positionnement vertical
+            val centerX = ((box.left + box.right - labelW) / 2f)
+                .coerceIn(screenMarginHorizontal, screenWidth - labelW - screenMarginHorizontal)
+            val leftX = box.left
+                .coerceIn(screenMarginHorizontal, screenWidth - labelW - screenMarginHorizontal)
+            val rightX = (box.right - labelW)
+                .coerceIn(screenMarginHorizontal, screenWidth - labelW - screenMarginHorizontal)
 
-            var finalX = (box.left).coerceIn(screenMarginHorizontal, screenWidth - labelW - screenMarginHorizontal)
-            var finalY = box.top - labelH - 4f
+            val xCandidates = listOf(centerX, leftX, rightX).distinct()
+
+            var placedX = centerX
+            var placedY = box.top - labelH - 4f
+            var isPlaced = false
             var requiresConnector = false
-            var connectorStartX = 0f
-            var connectorStartY = 0f
-            var connectorEndX = 0f
-            var connectorEndY = 0f
+            var connStartX = 0f
+            var connStartY = 0f
+            var connEndX = 0f
+            var connEndY = 0f
 
-            val candidateRectAbove = RectF(finalX, finalY, finalX + labelW, finalY + labelH)
+            // Stratégie 1 : Au-dessus de la boîte (position préférée)
+            val yAbove = box.top - labelH - 4f
+            if (yAbove >= safeTop && yAbove + labelH <= safeBottom) {
+                for (x in xCandidates) {
+                    val rect = RectF(x, yAbove, x + labelW, yAbove + labelH)
+                    if (!collidesWithAny(rect, placedRects)) {
+                        placedX = x
+                        placedY = yAbove
+                        isPlaced = true
+                        break
+                    }
+                }
+            }
 
-            if (finalY >= safeTop && !collidesWithAny(candidateRectAbove, placedRects)) {
-                // Placement 1 réussi : au-dessus
-                finalY = candidateRectAbove.top
-            } else {
-                // Placement 2 : à l'intérieur haut de la boîte
-                val candidateRectInside = RectF(finalX, box.top + 6f, finalX + labelW, box.top + 6f + labelH)
-                if (candidateRectInside.bottom <= box.bottom &&
-                    candidateRectInside.bottom <= safeBottom &&
-                    !collidesWithAny(candidateRectInside, placedRects)
-                ) {
-                    finalY = candidateRectInside.top
-                } else {
-                    // Placement 3 : en dessous de la boîte
-                    val candidateRectBelow = RectF(finalX, box.bottom + 6f, finalX + labelW, box.bottom + 6f + labelH)
-                    if (candidateRectBelow.bottom <= safeBottom &&
-                        !collidesWithAny(candidateRectBelow, placedRects)
-                    ) {
-                        finalY = candidateRectBelow.top
-                    } else {
-                        // Placement 4 : recherche d'un emplacement libre dans l'espace sécurisé avec déport
-                        var foundSlot = false
-                        var testY = safeTop
-                        while (testY + labelH <= safeBottom) {
-                            val candidateRectFallback = RectF(finalX, testY, finalX + labelW, testY + labelH)
-                            if (!collidesWithAny(candidateRectFallback, placedRects)) {
-                                finalY = testY
-                                foundSlot = true
-                                requiresConnector = true
-                                connectorStartX = finalX + (labelW / 2f)
-                                connectorStartY = if (finalY < box.top) finalY + labelH else finalY
-                                connectorEndX = (box.left + box.right) / 2f
-                                connectorEndY = if (finalY < box.top) box.top else box.bottom
-                                break
-                            }
-                            testY += labelH + labelSpacing
-                        }
-
-                        if (!foundSlot) {
-                            // Forcer un décalage vertical minimal pour éviter un empilement exact
-                            finalY = (box.top - labelH - 4f).coerceIn(safeTop, safeBottom - labelH)
-                            if (placedRects.isNotEmpty()) {
-                                finalY = (placedRects.last().bottom + 4f).coerceIn(safeTop, safeBottom - labelH)
-                            }
+            // Stratégie 2 : À l'intérieur haut de la boîte (si la boîte est suffisamment haute)
+            if (!isPlaced && (box.bottom - box.top) >= labelH * 1.6f) {
+                val yInside = box.top + 6f
+                if (yInside >= safeTop && yInside + labelH <= box.bottom && yInside + labelH <= safeBottom) {
+                    for (x in xCandidates) {
+                        val rect = RectF(x, yInside, x + labelW, yInside + labelH)
+                        if (!collidesWithAny(rect, placedRects)) {
+                            placedX = x
+                            placedY = yInside
+                            isPlaced = true
+                            break
                         }
                     }
                 }
             }
 
-            // Validation finale des bornes d'écran strictes
-            finalX = finalX.coerceIn(screenMarginHorizontal, screenWidth - labelW - screenMarginHorizontal)
-            finalY = finalY.coerceIn(safeTop, safeBottom - labelH)
+            // Stratégie 3 : En dessous de la boîte
+            if (!isPlaced) {
+                val yBelow = box.bottom + 6f
+                if (yBelow >= safeTop && yBelow + labelH <= safeBottom) {
+                    for (x in xCandidates) {
+                        val rect = RectF(x, yBelow, x + labelW, yBelow + labelH)
+                        if (!collidesWithAny(rect, placedRects)) {
+                            placedX = x
+                            placedY = yBelow
+                            isPlaced = true
+                            break
+                        }
+                    }
+                }
+            }
 
-            val placedRect = RectF(finalX, finalY, finalX + labelW, finalY + labelH)
-            placedRects.add(placedRect)
+            // Stratégie 4 : Déport latéral / vertical avec ligne de liaison
+            if (!isPlaced) {
+                var foundSlot = false
+                var testY = safeTop
+                while (testY + labelH <= safeBottom) {
+                    val rect = RectF(placedX, testY, placedX + labelW, testY + labelH)
+                    if (!collidesWithAny(rect, placedRects)) {
+                        placedY = testY
+                        foundSlot = true
+                        requiresConnector = true
+                        connStartX = placedX + (labelW / 2f)
+                        connStartY = if (placedY < box.top) placedY + labelH else placedY
+                        connEndX = (box.left + box.right) / 2f
+                        connEndY = if (placedY < box.top) box.top else box.bottom
+                        isPlaced = true
+                        break
+                    }
+                    testY += labelH + labelSpacing
+                }
+
+                if (!foundSlot) {
+                    // Masquer toute étiquette secondaire si aucun emplacement sans collision n'est disponible
+                    // afin de ne jamais obstruer le contenu visuel ou les contrôles de la caméra
+                    if (!obj.isSelectedSubject) {
+                        continue
+                    }
+
+                    // Dernier recours pour le sujet sélectionné ou en mode Diagnostic : décalage avec ligne de liaison
+                    placedY = (box.top - labelH - 4f).coerceIn(safeTop, safeBottom - labelH)
+                    if (placedRects.isNotEmpty()) {
+                        placedY = (placedRects.last().bottom + 4f).coerceIn(safeTop, safeBottom - labelH)
+                    }
+                    requiresConnector = true
+                    connStartX = placedX + (labelW / 2f)
+                    connStartY = placedY + (labelH / 2f)
+                    connEndX = (box.left + box.right) / 2f
+                    connEndY = (box.top + box.bottom) / 2f
+                }
+            }
+
+            // Clamping strict dans les bornes d'écran autorisées
+            placedX = placedX.coerceIn(screenMarginHorizontal, screenWidth - labelW - screenMarginHorizontal)
+            placedY = placedY.coerceIn(safeTop, safeBottom - labelH)
+
+            val finalRect = RectF(placedX, placedY, placedX + labelW, placedY + labelH)
+            placedRects.add(finalRect)
 
             placedLabels.add(
                 PositionedLabel(
@@ -169,15 +216,15 @@ class DetectionLabelLayoutManager(
                     isSelectedSubject = obj.isSelectedSubject,
                     isLocked = obj.isSelectedSubject && obj.isLocked,
                     confidenceTier = obj.confidenceTier,
-                    labelX = finalX,
-                    labelY = finalY,
+                    labelX = placedX,
+                    labelY = placedY,
                     labelWidth = labelW,
                     labelHeight = labelH,
                     hasConnectorLine = requiresConnector,
-                    connectorStartX = connectorStartX,
-                    connectorStartY = connectorStartY,
-                    connectorEndX = connectorEndX,
-                    connectorEndY = connectorEndY
+                    connectorStartX = connStartX,
+                    connectorStartY = connStartY,
+                    connectorEndX = connEndX,
+                    connectorEndY = connEndY
                 )
             )
         }

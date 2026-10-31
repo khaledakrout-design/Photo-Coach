@@ -45,6 +45,10 @@ class ScenePerceptionManager(
     private var fpsWindowStartTime = 0L
     private var currentFps = 0f
 
+    // Historique des latences d'inférence sur une fenêtre glissante d'au moins 10 secondes (Jalon 2.2.1)
+    private val latencyHistory = java.util.ArrayDeque<Pair<Long, Long>>()
+    private val latencyWindowMs = 10000L
+
     init {
         scope.launch {
             val initialized = detector.initialize()
@@ -123,60 +127,81 @@ class ScenePerceptionManager(
                 lockedObjectId = selectionEngine.getLockedSubjectId()
             )
 
-            // 2. Traitement de la sélection du sujet avec priorité verrouillage manuel et hystérésis
+            // 2. Traitement de la sélection du sujet avec priorité absolue au verrouillage manuel et hystérésis
             val selectionResult = selectionEngine.processSelection(trackedObjects)
 
-            // 3. Mesure mémoire et télémétrie
+            // 3. Mesure mémoire et télémétrie de performance sur fenêtre glissante (>= 10s)
             val memoryUsageMb = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024)
+            val latencyMs = inferenceResult.inferenceTimeMs
 
-            // 4. Détermination précise du statut utilisateur
+            synchronized(latencyHistory) {
+                latencyHistory.addLast(Pair(now, latencyMs))
+                while (latencyHistory.isNotEmpty() && (now - latencyHistory.first().first) > latencyWindowMs) {
+                    latencyHistory.removeFirst()
+                }
+            }
+
+            val latenciesSnapshot = synchronized(latencyHistory) { latencyHistory.map { it.second } }
+            val avgLatency = if (latenciesSnapshot.isNotEmpty()) latenciesSnapshot.average().toFloat() else latencyMs.toFloat()
+            val sortedLatencies = latenciesSnapshot.sorted()
+            val p95Index = if (sortedLatencies.isNotEmpty()) ((sortedLatencies.size * 95) / 100).coerceIn(0, sortedLatencies.size - 1) else 0
+            val p95Latency = if (sortedLatencies.isNotEmpty()) sortedLatencies[p95Index] else latencyMs
+            val minLatency = if (sortedLatencies.isNotEmpty()) sortedLatencies.first() else latencyMs
+            val maxLatency = if (sortedLatencies.isNotEmpty()) sortedLatencies.last() else latencyMs
+
+            // 4. Détermination précise des trois états visuels (Jalon 2.2.1)
+            // - MANUALLY LOCKED : Sujet verrouillé : [Object]
+            // - AMBIGUOUS : Plusieurs sujets possibles — Touchez pour choisir.
+            // - PROPOSED : Sujet suggéré : [Object]
+            // Règle stricte : L'UI ne doit jamais communiquer simultanément une ambiguïté et un verrouillage manuel.
             val totalValidCount = trackedObjects.size
             val selectedSubj = selectionResult.selectedSubject
+            val isManuallyLocked = selectionResult.isManualLocked && selectedSubj != null
 
-            val (newState, statusText) = when {
+            val (visualState, newState, statusText) = when {
                 selectionResult.isSubjectLost -> {
-                    Pair(
+                    Triple(
+                        SubjectVisualState.NONE,
                         PerceptionStateEnum.SUBJECT_LOST,
-                        PerceptionStateEnum.SUBJECT_LOST.defaultMessageFr
+                        "Sujet verrouillé perdu · Touchez pour reverrouiller"
                     )
                 }
-                selectionResult.isManualLocked && selectedSubj != null -> {
-                    Pair(
+                isManuallyLocked -> {
+                    // Priorité absolue : verrouillage manuel
+                    Triple(
+                        SubjectVisualState.MANUALLY_LOCKED,
                         PerceptionStateEnum.OBJECT_FOUND,
-                        "🔒 Sujet verrouillé : ${selectedSubj.label} (${selectedSubj.confidencePercent}%)"
+                        "Sujet verrouillé : ${selectedSubj!!.label}"
+                    )
+                }
+                selectionResult.isAmbiguous -> {
+                    // Ambiguïté sans verrouillage manuel
+                    Triple(
+                        SubjectVisualState.AMBIGUOUS,
+                        PerceptionStateEnum.OBJECT_FOUND,
+                        "Plusieurs sujets possibles — Touchez pour choisir."
+                    )
+                }
+                selectedSubj != null -> {
+                    // Proposition automatique
+                    Triple(
+                        SubjectVisualState.PROPOSED,
+                        PerceptionStateEnum.OBJECT_FOUND,
+                        "Sujet suggéré : ${selectedSubj.label}"
                     )
                 }
                 totalValidCount == 0 -> {
-                    Pair(
+                    Triple(
+                        SubjectVisualState.NONE,
                         PerceptionStateEnum.NO_OBJECT,
                         PerceptionStateEnum.NO_OBJECT.defaultMessageFr
                     )
                 }
-                selectedSubj != null && selectedSubj.confidence < confidenceSettings.mediumThreshold -> {
-                    Pair(
-                        PerceptionStateEnum.LOW_CONFIDENCE,
-                        PerceptionStateEnum.LOW_CONFIDENCE.defaultMessageFr
-                    )
-                }
-                selectionResult.isAmbiguous -> {
-                    Pair(
-                        PerceptionStateEnum.OBJECT_FOUND,
-                        "Objets détectés ($totalValidCount) · Touchez pour choisir"
-                    )
-                }
-                totalValidCount == 1 -> {
-                    val label = selectedSubj?.label ?: "Objet"
-                    val conf = selectedSubj?.confidencePercent ?: 0
-                    Pair(
-                        PerceptionStateEnum.OBJECT_FOUND,
-                        "Objet détecté : $label ($conf%)"
-                    )
-                }
                 else -> {
-                    val label = selectedSubj?.label ?: "Objet"
-                    Pair(
-                        PerceptionStateEnum.OBJECT_FOUND,
-                        "Objets détectés ($totalValidCount) · Sujet : $label"
+                    Triple(
+                        SubjectVisualState.NONE,
+                        PerceptionStateEnum.ACTIVE,
+                        PerceptionStateEnum.ACTIVE.defaultMessageFr
                     )
                 }
             }
@@ -186,9 +211,10 @@ class ScenePerceptionManager(
                     state = newState,
                     detectedObjects = selectionResult.annotatedObjects,
                     selectedSubject = selectedSubj,
-                    isManualSelection = selectionResult.isManualLocked,
-                    isLocked = selectionResult.isManualLocked,
-                    isAmbiguous = selectionResult.isAmbiguous,
+                    visualState = visualState,
+                    isManualSelection = isManuallyLocked,
+                    isLocked = isManuallyLocked,
+                    isAmbiguous = (visualState == SubjectVisualState.AMBIGUOUS),
                     statusText = statusText,
                     detectionCount = totalValidCount,
                     displayMode = displayMode
@@ -200,13 +226,17 @@ class ScenePerceptionManager(
                     isModelLoaded = true,
                     detectionCount = totalValidCount,
                     activeTracksCount = trackedObjects.size,
-                    lastInferenceTimeMs = inferenceResult.inferenceTimeMs,
+                    lastInferenceTimeMs = latencyMs,
+                    avgInferenceTimeMs = avgLatency,
+                    p95InferenceTimeMs = p95Latency,
+                    minInferenceTimeMs = minLatency,
+                    maxInferenceTimeMs = maxLatency,
                     fps = currentFps,
                     memoryUsageMb = memoryUsageMb,
                     selectedSubjectLabel = selectedSubj?.label,
                     selectedSubjectConfidence = selectedSubj?.confidence,
                     selectedSubjectTrackingId = selectedSubj?.trackingId,
-                    isLocked = selectionResult.isManualLocked,
+                    isLocked = isManuallyLocked,
                     displayMode = displayMode
                 )
             }
@@ -263,6 +293,14 @@ class ScenePerceptionManager(
 
     fun getConfidenceSettings(): ConfidenceFilterSettings = confidenceSettings
 
+    fun updatePhotographyContext(
+        category: com.example.guidance.PhotographyCategory?,
+        isAutomaticMode: Boolean,
+        intention: com.example.guidance.CreativeIntention? = null
+    ) {
+        selectionEngine.updatePhotographyContext(category, isAutomaticMode, intention)
+    }
+
     /**
      * Verrouille manuellement le sujet sous le point tactile (normX, normY).
      */
@@ -278,10 +316,11 @@ class ScenePerceptionManager(
                     state = PerceptionStateEnum.OBJECT_FOUND,
                     detectedObjects = updatedSelection.annotatedObjects,
                     selectedSubject = updatedSelection.selectedSubject,
+                    visualState = SubjectVisualState.MANUALLY_LOCKED,
                     isManualSelection = true,
                     isLocked = true,
                     isAmbiguous = false,
-                    statusText = "🔒 Sujet verrouillé : ${touched.label} (${touched.confidencePercent}%)"
+                    statusText = "Sujet verrouillé : ${touched.label}"
                 )
             }
             _diagnostics.update {
@@ -298,24 +337,64 @@ class ScenePerceptionManager(
     }
 
     /**
+     * Verrouille directement un objet spécifique sans passer par les coordonnées tactiles.
+     */
+    fun lockSubjectDirectly(obj: DetectedObject) {
+        selectionEngine.lockSubjectManually(obj.id, obj.trackingId)
+        val currentObjects = _perceptionState.value.detectedObjects
+        val updatedSelection = selectionEngine.processSelection(currentObjects)
+        _perceptionState.update {
+            it.copy(
+                state = PerceptionStateEnum.OBJECT_FOUND,
+                detectedObjects = updatedSelection.annotatedObjects,
+                selectedSubject = updatedSelection.selectedSubject,
+                visualState = SubjectVisualState.MANUALLY_LOCKED,
+                isManualSelection = true,
+                isLocked = true,
+                isAmbiguous = false,
+                statusText = "Sujet verrouillé : ${obj.label}"
+            )
+        }
+        _diagnostics.update {
+            it.copy(
+                isLocked = true,
+                selectedSubjectLabel = obj.label,
+                selectedSubjectConfidence = obj.confidence,
+                selectedSubjectTrackingId = obj.trackingId
+            )
+        }
+    }
+
+    /**
      * Déverrouille le sujet manuel et rétablit la sélection heuristique automatique.
      */
     fun unlockSubject() {
         selectionEngine.unlockSubject()
         val currentObjects = _perceptionState.value.detectedObjects
         val updated = selectionEngine.processSelection(currentObjects)
+        val newVisualState = when {
+            updated.isAmbiguous -> SubjectVisualState.AMBIGUOUS
+            updated.selectedSubject != null -> SubjectVisualState.PROPOSED
+            else -> SubjectVisualState.NONE
+        }
+        val newStatus = when (newVisualState) {
+            SubjectVisualState.AMBIGUOUS -> "Plusieurs sujets possibles — Touchez pour choisir."
+            SubjectVisualState.PROPOSED -> "Sujet suggéré : ${updated.selectedSubject?.label}"
+            else -> if (updated.annotatedObjects.isEmpty()) {
+                PerceptionStateEnum.NO_OBJECT.defaultMessageFr
+            } else {
+                PerceptionStateEnum.ACTIVE.defaultMessageFr
+            }
+        }
         _perceptionState.update {
             it.copy(
                 detectedObjects = updated.annotatedObjects,
                 selectedSubject = updated.selectedSubject,
+                visualState = newVisualState,
                 isManualSelection = false,
                 isLocked = false,
                 isAmbiguous = updated.isAmbiguous,
-                statusText = if (updated.selectedSubject != null) {
-                    "Sélection automatique : ${updated.selectedSubject.label}"
-                } else {
-                    PerceptionStateEnum.ACTIVE.defaultMessageFr
-                }
+                statusText = newStatus
             )
         }
         _diagnostics.update {

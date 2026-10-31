@@ -77,10 +77,18 @@ fun SettingsScreen(
     onToggleHorizonLevel: () -> Unit,
     onToggleDiagnostics: () -> Unit = {},
     onToggleDetectionDisplayMode: () -> Unit = {},
+    onUpdateConfidence: (Float, Float) -> Unit = { _, _ -> },
+    onResetConfidence: () -> Unit = {},
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showAboutSection by remember { mutableStateOf(false) }
+    var currentHighThreshold by remember(settings.confidenceSettings.highThreshold) {
+        mutableStateOf(settings.confidenceSettings.highThreshold)
+    }
+    var currentMedThreshold by remember(settings.confidenceSettings.mediumThreshold) {
+        mutableStateOf(settings.confidenceSettings.mediumThreshold)
+    }
 
     Scaffold(
         topBar = {
@@ -196,11 +204,166 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Contrôle interactif des seuils de confiance (Développeur)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(CharcoalSurface)
+                    .border(1.dp, CharcoalBorder, RoundedCornerShape(12.dp))
+                    .padding(14.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.CenterFocusStrong,
+                        contentDescription = null,
+                        tint = CyanAccent,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "RÉGLAGE DES SEUILS (DIAGNOSTIC)",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "Ajustez les seuils de filtrage visuel du viseur sans modifier les probabilités brutes calculées par le modèle :",
+                    color = TextSecondary,
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Seuil Haute Confiance
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Haute confiance (Viseur net) : ${(currentHighThreshold * 100).toInt()}%",
+                        color = PureWhite,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(CharcoalDark)
+                                .border(1.dp, CharcoalBorder, RoundedCornerShape(6.dp))
+                                .clickable {
+                                    val newVal = (currentHighThreshold - 0.05f).coerceAtLeast(currentMedThreshold + 0.05f)
+                                    currentHighThreshold = newVal
+                                    onUpdateConfidence(newVal, currentMedThreshold)
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("-5%", color = TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(CharcoalDark)
+                                .border(1.dp, CharcoalBorder, RoundedCornerShape(6.dp))
+                                .clickable {
+                                    val newVal = (currentHighThreshold + 0.05f).coerceAtMost(0.95f)
+                                    currentHighThreshold = newVal
+                                    onUpdateConfidence(newVal, currentMedThreshold)
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("+5%", color = CyanAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Seuil Moyenne Confiance
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Moyenne confiance (Contours adoucis) : ${(currentMedThreshold * 100).toInt()}%",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(CharcoalDark)
+                                .border(1.dp, CharcoalBorder, RoundedCornerShape(6.dp))
+                                .clickable {
+                                    val newVal = (currentMedThreshold - 0.05f).coerceAtLeast(0.20f)
+                                    currentMedThreshold = newVal
+                                    onUpdateConfidence(currentHighThreshold, newVal)
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("-5%", color = TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(CharcoalDark)
+                                .border(1.dp, CharcoalBorder, RoundedCornerShape(6.dp))
+                                .clickable {
+                                    val newVal = (currentMedThreshold + 0.05f).coerceAtMost(currentHighThreshold - 0.05f)
+                                    currentMedThreshold = newVal
+                                    onUpdateConfidence(currentHighThreshold, newVal)
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("+5%", color = CyanAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Bouton réinitialisation
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(CharcoalDark)
+                        .border(1.dp, CharcoalBorder, RoundedCornerShape(8.dp))
+                        .clickable {
+                            currentHighThreshold = 0.70f
+                            currentMedThreshold = 0.45f
+                            onResetConfidence()
+                        }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Rétablir seuils par défaut (70% / 45%)",
+                        color = CyanAccent,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
             // Explication des seuils de confiance (Jalon 2.1 Section 1)
             InfoItemCard(
                 icon = Icons.Default.CenterFocusStrong,
                 title = "Gestion intelligente de la confiance",
-                description = "• Haute confiance (≥ 70%) : Boîtes nettes et étiquettes priorisées.\n• Moyenne confiance (45% à 69%) : Contours adoucis sans surcharge.\n• Faible confiance (< 45%) : Filtré automatiquement en mode Essentiel."
+                description = "• Haute confiance (≥ ${(currentHighThreshold * 100).toInt()}%) : Boîtes nettes et étiquettes priorisées.\n• Moyenne confiance (${(currentMedThreshold * 100).toInt()}% à ${(currentHighThreshold * 100).toInt() - 1}%) : Contours adoucis sans surcharge.\n• Faible confiance (< ${(currentMedThreshold * 100).toInt()}%) : Filtré automatiquement en mode Essentiel."
             )
 
             Spacer(modifier = Modifier.height(8.dp))

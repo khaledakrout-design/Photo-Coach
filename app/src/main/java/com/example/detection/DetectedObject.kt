@@ -26,11 +26,31 @@ data class ConfidenceFilterSettings(
     val highThreshold: Float = 0.70f,
     val mediumThreshold: Float = 0.45f,
     val minConfidence: Float = 0.30f
-)
+) {
+    fun classify(confidence: Float): ConfidenceTier {
+        return when {
+            confidence >= highThreshold -> ConfidenceTier.HIGH
+            confidence >= mediumThreshold -> ConfidenceTier.MEDIUM
+            else -> ConfidenceTier.LOW
+        }
+    }
+}
+
+/**
+ * Rôles de pertinence photographique selon la catégorie active (Jalon 2.2).
+ */
+enum class ObjectRelevanceRole(val labelFr: String, val scoreMultiplier: Float) {
+    PRIMARY_CANDIDATE("Sujet prioritaire", 1.35f),
+    SECONDARY_OBJECT("Objet secondaire", 1.0f),
+    CONTEXT_OBJECT("Élément de contexte", 0.35f),
+    BACKGROUND_OBJECT("Arrière-plan / Surface", 0.10f),
+    UNKNOWN("Non classifié", 0.70f)
+}
 
 /**
  * Représente un objet détecté en temps réel par le moteur de perception visuelle local.
- * Sépare rigoureusement les coordonnées brutes (rawBoundingBox) des coordonnées visuellement lissées (boundingBox).
+ * Sépare rigoureusement les coordonnées brutes (rawBoundingBox) des coordonnées visuellement lissées (boundingBox),
+ * et préserve le label original du modèle (rawModelLabel) distinct de sa traduction française (label).
  */
 data class DetectedObject(
     val id: String,
@@ -38,6 +58,8 @@ data class DetectedObject(
     val confidence: Float,
     val boundingBox: RectF, // Coordonnées normalisées lissées (0.0f .. 1.0f)
     val rawBoundingBox: RectF = boundingBox, // Coordonnées brutes du modèle sans lissage
+    val rawModelLabel: String = "", // Label d'origine du modèle COCO (ex: "cup", "dining table", "bottle")
+    val relevanceRole: ObjectRelevanceRole = ObjectRelevanceRole.UNKNOWN,
     val normalizedCenterX: Float = ((boundingBox.left + boundingBox.right) / 2f).coerceIn(0f, 1f),
     val normalizedCenterY: Float = ((boundingBox.top + boundingBox.bottom) / 2f).coerceIn(0f, 1f),
     val normalizedWidth: Float = (boundingBox.right - boundingBox.left).coerceIn(0f, 1f),
@@ -82,6 +104,19 @@ data class DetectedObject(
 }
 
 /**
+ * Les trois états visuels distincts de sélection du sujet (Jalon 2.2.1).
+ * AMBIGUOUS : Plusieurs sujets possibles — Touchez pour choisir.
+ * PROPOSED : Sujet suggéré : [Object]
+ * MANUALLY_LOCKED : Sujet verrouillé : [Object]
+ */
+enum class SubjectVisualState {
+    NONE,
+    AMBIGUOUS,
+    PROPOSED,
+    MANUALLY_LOCKED
+}
+
+/**
  * États authentiques de perception visuelle pour l'interface utilisateur.
  */
 enum class PerceptionStateEnum(val defaultMessageFr: String) {
@@ -101,6 +136,7 @@ data class PerceptionState(
     val state: PerceptionStateEnum = PerceptionStateEnum.INITIALIZING,
     val detectedObjects: List<DetectedObject> = emptyList(),
     val selectedSubject: DetectedObject? = null,
+    val visualState: SubjectVisualState = SubjectVisualState.NONE,
     val isManualSelection: Boolean = false,
     val isLocked: Boolean = false,
     val isAmbiguous: Boolean = false,
@@ -111,7 +147,7 @@ data class PerceptionState(
 )
 
 /**
- * Données télémétriques et diagnostiques de l'inférence locale.
+ * Données télémétriques et diagnostiques de l'inférence locale (Jalon 2.2.1).
  */
 data class DetectionDiagnostics(
     val isModelLoaded: Boolean = false,
@@ -119,6 +155,10 @@ data class DetectionDiagnostics(
     val detectionCount: Int = 0,
     val activeTracksCount: Int = 0,
     val lastInferenceTimeMs: Long = 0L,
+    val avgInferenceTimeMs: Float = 0f,
+    val p95InferenceTimeMs: Long = 0L,
+    val minInferenceTimeMs: Long = 0L,
+    val maxInferenceTimeMs: Long = 0L,
     val fps: Float = 0f,
     val memoryUsageMb: Long = 0L,
     val selectedSubjectLabel: String? = null,
@@ -126,5 +166,5 @@ data class DetectionDiagnostics(
     val selectedSubjectTrackingId: Int? = null,
     val isLocked: Boolean = false,
     val displayMode: DetectionDisplayMode = DetectionDisplayMode.ESSENTIAL,
-    val hardwareDelegate: String = "CPU (optimisé ARM / Galaxy S9)"
+    val hardwareDelegate: String = "CPU (optimisé ARM / NEON)"
 )

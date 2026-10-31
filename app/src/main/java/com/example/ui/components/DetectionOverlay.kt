@@ -86,9 +86,9 @@ fun DetectionOverlay(
         val density = LocalDensity.current
         val layoutManager = remember {
             DetectionLabelLayoutManager(
-                screenMarginHorizontal = with(density) { 12.dp.toPx() },
-                topExclusionBoundary = with(density) { 95.dp.toPx() },
-                bottomExclusionBoundary = with(density) { 175.dp.toPx() },
+                screenMarginHorizontal = with(density) { 14.dp.toPx() },
+                topExclusionBoundary = with(density) { 145.dp.toPx() },
+                bottomExclusionBoundary = with(density) { 190.dp.toPx() },
                 labelSpacing = with(density) { 6.dp.toPx() }
             )
         }

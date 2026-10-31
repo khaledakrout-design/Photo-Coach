@@ -28,7 +28,7 @@ class LocalObjectDetector(
         private const val TAG = "LocalObjectDetector"
 
         // Dictionnaire de traduction française des 80 classes standard COCO du modèle EfficientDet-Lite0
-        private val COCO_LABELS_FR = mapOf(
+        val COCO_LABELS_FR: Map<String, String> = mapOf(
             "person" to "Personne",
             "bicycle" to "Vélo",
             "car" to "Voiture",
@@ -39,7 +39,7 @@ class LocalObjectDetector(
             "truck" to "Camion",
             "boat" to "Bateau",
             "traffic light" to "Feu tricolore",
-            "fire hydrant" to "Borne incendie",
+            "fire hydrant" to "Borne d'incendie",
             "stop sign" to "Panneau stop",
             "parking meter" to "Horodateur",
             "bench" to "Banc",
@@ -61,7 +61,7 @@ class LocalObjectDetector(
             "frisbee" to "Frisbee",
             "skis" to "Skis",
             "snowboard" to "Snowboard",
-            "sports ball" to "Balle de sport",
+            "sports ball" to "Ballon de sport",
             "kite" to "Cerf-volant",
             "baseball bat" to "Batte de baseball",
             "baseball glove" to "Gant de baseball",
@@ -70,7 +70,7 @@ class LocalObjectDetector(
             "tennis racket" to "Raquette de tennis",
             "bottle" to "Bouteille",
             "wine glass" to "Verre à pied",
-            "cup" to "Tasse / Gobelet",
+            "cup" to "Tasse",
             "fork" to "Fourchette",
             "knife" to "Couteau",
             "spoon" to "Cuillère",
@@ -87,7 +87,7 @@ class LocalObjectDetector(
             "cake" to "Gâteau",
             "chair" to "Chaise",
             "couch" to "Canapé",
-            "potted plant" to "Plante",
+            "potted plant" to "Plante en pot",
             "bed" to "Lit",
             "dining table" to "Table",
             "toilet" to "Toilettes",
@@ -110,6 +110,10 @@ class LocalObjectDetector(
             "hair drier" to "Sèche-cheveux",
             "toothbrush" to "Brosse à dents"
         )
+
+        fun getFrenchLabel(rawLabel: String): String {
+            return COCO_LABELS_FR[rawLabel.lowercase().trim()] ?: rawLabel
+        }
     }
 
     private var objectDetector: ObjectDetector? = null
@@ -197,7 +201,7 @@ class LocalObjectDetector(
                 val score = topCategory?.score() ?: 0f
 
                 // Traduction française élégante si disponible dans COCO
-                val frenchLabel = COCO_LABELS_FR[rawLabel.lowercase()] ?: rawLabel
+                val frenchLabel = getFrenchLabel(rawLabel)
 
                 val box = detection.boundingBox()
 
@@ -216,6 +220,7 @@ class LocalObjectDetector(
                     DetectedObject(
                         id = "det_${System.currentTimeMillis()}_$index",
                         label = frenchLabel,
+                        rawModelLabel = rawLabel.lowercase().trim(),
                         confidence = score,
                         boundingBox = normalizedBox
                     )

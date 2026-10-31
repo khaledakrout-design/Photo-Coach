@@ -156,6 +156,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         showFeedback("Sujet déverrouillé · Suivi automatique rétabli")
     }
 
+    fun selectSubject(obj: com.example.detection.DetectedObject) {
+        scenePerceptionManager.lockSubjectDirectly(obj)
+        subjectSelectionManager.setNormalizedPoint(
+            obj.normalizedCenterX,
+            obj.normalizedCenterY,
+            SubjectSelectionSource.MANUAL_TOUCH
+        )
+        showFeedback("Sujet verrouillé : ${obj.label} (${obj.confidencePercent}%)")
+    }
+
     fun toggleDetectionDisplayMode(): com.example.detection.DetectionDisplayMode {
         val newMode = scenePerceptionManager.toggleDisplayMode()
         _settings.update { it.copy(displayMode = newMode) }
@@ -175,17 +185,57 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         showFeedback("Diagnostic télémétrique $status")
     }
 
+    fun updateConfidenceThresholds(high: Float, medium: Float, min: Float = 0.30f) {
+        val newSettings = com.example.detection.ConfidenceFilterSettings(
+            highThreshold = high.coerceIn(0.50f, 0.95f),
+            mediumThreshold = medium.coerceIn(0.20f, high - 0.05f),
+            minConfidence = min.coerceIn(0.10f, medium - 0.05f)
+        )
+        scenePerceptionManager.updateConfidenceSettings(newSettings)
+        _settings.update { it.copy(confidenceSettings = newSettings) }
+        showFeedback("Seuils confiance : Haut ${(newSettings.highThreshold * 100).toInt()}% • Moyen ${(newSettings.mediumThreshold * 100).toInt()}%")
+    }
+
+    fun resetConfidenceThresholds() {
+        val defaultSettings = com.example.detection.ConfidenceFilterSettings(
+            highThreshold = 0.70f,
+            mediumThreshold = 0.45f,
+            minConfidence = 0.30f
+        )
+        scenePerceptionManager.updateConfidenceSettings(defaultSettings)
+        _settings.update { it.copy(confidenceSettings = defaultSettings) }
+        showFeedback("Seuils de confiance réinitialisés par défaut (70% / 45%)")
+    }
+
     fun setGuidanceMode(mode: GuidanceMode) {
         _settings.update { it.copy(activeMode = mode) }
+        val isAuto = mode == GuidanceMode.AUTOMATIC
+        scenePerceptionManager.updatePhotographyContext(
+            category = if (isAuto) null else _settings.value.category,
+            isAutomaticMode = isAuto,
+            intention = _settings.value.intention
+        )
     }
 
     fun setPhotographyCategory(category: PhotographyCategory) {
         _settings.update { it.copy(category = category) }
+        val isAuto = _settings.value.activeMode == GuidanceMode.AUTOMATIC
+        scenePerceptionManager.updatePhotographyContext(
+            category = if (isAuto) null else category,
+            isAutomaticMode = isAuto,
+            intention = _settings.value.intention
+        )
         showFeedback("Catégorie : ${category.labelFr}")
     }
 
     fun setCreativeIntention(intention: CreativeIntention) {
         _settings.update { it.copy(intention = intention) }
+        val isAuto = _settings.value.activeMode == GuidanceMode.AUTOMATIC
+        scenePerceptionManager.updatePhotographyContext(
+            category = if (isAuto) null else _settings.value.category,
+            isAutomaticMode = isAuto,
+            intention = intention
+        )
         showFeedback("Intention : ${intention.labelFr}")
     }
 

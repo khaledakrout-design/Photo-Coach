@@ -1,5 +1,6 @@
 package com.example.guidance
 
+import com.example.detection.ConfidenceFilterSettings
 import com.example.detection.DetectionDisplayMode
 
 /**
@@ -13,5 +14,6 @@ data class GuidanceSettings(
     val showRuleOfThirds: Boolean = true,
     val showHorizonLevel: Boolean = true,
     val showDiagnostics: Boolean = false,
-    val displayMode: DetectionDisplayMode = DetectionDisplayMode.ESSENTIAL
+    val displayMode: DetectionDisplayMode = DetectionDisplayMode.ESSENTIAL,
+    val confidenceSettings: ConfidenceFilterSettings = ConfidenceFilterSettings()
 )

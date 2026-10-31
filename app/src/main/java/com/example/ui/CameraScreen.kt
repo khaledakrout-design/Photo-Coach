@@ -21,13 +21,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.filled.LockOpen
 import com.example.detection.DetectionDisplayMode
+import com.example.ui.components.DetectionDetailsDialog
+import com.example.ui.components.DetectionModeSegmentedControl
+import com.example.ui.components.DiagnosticBottomSheet
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -104,6 +109,7 @@ fun CameraScreen(
     val diagnostics by viewModel.diagnostics.collectAsState()
 
     var previewViewRef by remember { mutableStateOf<PreviewView?>(null) }
+    var showDetectionDetailsDialog by remember { mutableStateOf(false) }
 
     // Gestion du retour système
     BackHandler {
@@ -164,6 +170,8 @@ fun CameraScreen(
             onToggleHorizonLevel = { viewModel.toggleHorizonLevel() },
             onToggleDiagnostics = { viewModel.toggleDiagnostics() },
             onToggleDetectionDisplayMode = { viewModel.toggleDetectionDisplayMode() },
+            onUpdateConfidence = { h, m -> viewModel.updateConfidenceThresholds(h, m) },
+            onResetConfidence = { viewModel.resetConfidenceThresholds() },
             onNavigateBack = { viewModel.setSettingsOpen(false) }
         )
         return
@@ -317,7 +325,24 @@ fun CameraScreen(
                         )
                     }
 
-                    // Indicateur d'état compact de la caméra (Jalon 1.2 & Jalon 2.1)
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Sélecteur de Mode d'Affichage Horizontal Segmenté (Jalon 2.2)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        DetectionModeSegmentedControl(
+                            selectedMode = perceptionState.displayMode,
+                            onModeSelected = { mode ->
+                                if (perceptionState.displayMode != mode) {
+                                    viewModel.toggleDetectionDisplayMode()
+                                }
+                            }
+                        )
+                    }
+
+                    // Indicateur d'état compact de la caméra (Jalon 1.2 & Jalon 2.1 & Jalon 2.2)
                     val statusDotColor = when (perceptionState.state) {
                         PerceptionStateEnum.INITIALIZING -> Color.Gray
                         PerceptionStateEnum.ACTIVE -> CyanAccent
@@ -341,111 +366,99 @@ fun CameraScreen(
                     Row(
                         modifier = Modifier
                             .align(Alignment.CenterHorizontally)
-                            .padding(top = 6.dp),
+                            .padding(top = 4.dp, start = 12.dp, end = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.Center
                     ) {
-                        // Badge Statut de Détection
+                        // Badge Statut de Sélection du Sujet & Perception (Jalon 2.2.1)
                         Row(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(CharcoalBlack.copy(alpha = 0.85f))
-                                .border(1.dp, if (perceptionState.state == PerceptionStateEnum.SUBJECT_LOST) Color(0xFFFF9800) else CharcoalBorder, RoundedCornerShape(12.dp))
+                                .defaultMinSize(minHeight = 48.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                                .background(CharcoalBlack.copy(alpha = 0.88f))
+                                .border(
+                                    1.dp,
+                                    if (perceptionState.state == PerceptionStateEnum.SUBJECT_LOST) Color(0xFFFF9800)
+                                    else if (perceptionState.isLocked) CyanAccent
+                                    else CharcoalBorder,
+                                    RoundedCornerShape(24.dp)
+                                )
                                 .clickable {
                                     if (perceptionState.state == PerceptionStateEnum.SUBJECT_LOST) {
                                         viewModel.unlockSubject()
-                                    } else {
-                                        viewModel.toggleDiagnostics()
+                                    } else if (perceptionState.displayMode == DetectionDisplayMode.DIAGNOSTIC) {
+                                        showDetectionDetailsDialog = true
                                     }
                                 }
-                                .padding(horizontal = 9.dp, vertical = 4.dp)
+                                .padding(horizontal = 14.dp, vertical = 6.dp)
                                 .testTag("camera_status_compact_indicator"),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(6.dp)
+                                    .size(7.dp)
                                     .background(statusDotColor, CircleShape)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = compactStatusText,
                                 color = if (perceptionState.state == PerceptionStateEnum.SUBJECT_LOST) Color(0xFFFF9800) else TextPrimary,
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
-                                maxLines = 1
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.widthIn(max = 240.dp)
                             )
-                        }
 
-                        // Sélecteur rapide de Mode d'Affichage (Essentiel / Diagnostic)
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (perceptionState.displayMode == DetectionDisplayMode.DIAGNOSTIC) CyanAccent.copy(alpha = 0.2f) else CharcoalBlack.copy(alpha = 0.85f))
-                                .border(
-                                    width = 1.dp,
-                                    color = if (perceptionState.displayMode == DetectionDisplayMode.DIAGNOSTIC) CyanAccent else CharcoalBorder,
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                                .clickable { viewModel.toggleDetectionDisplayMode() }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                                .testTag("detection_mode_toggle_pill")
-                        ) {
-                            Text(
-                                text = if (perceptionState.displayMode == DetectionDisplayMode.ESSENTIAL) "ESSENTIEL" else "DIAGNOSTIC",
-                                color = if (perceptionState.displayMode == DetectionDisplayMode.DIAGNOSTIC) CyanAccent else TextSecondary,
-                                fontSize = 9.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        // Bouton de déverrouillage si le sujet est manuellement verrouillé
-                        if (perceptionState.isLocked) {
-                            Row(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(CharcoalBlack.copy(alpha = 0.90f))
-                                    .border(1.dp, CyanAccent, RoundedCornerShape(12.dp))
-                                    .clickable { viewModel.unlockSubject() }
-                                    .padding(horizontal = 7.dp, vertical = 4.dp)
-                                    .testTag("unlock_subject_button"),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.LockOpen,
-                                    contentDescription = "Déverrouiller le sujet",
-                                    tint = CyanAccent,
-                                    modifier = Modifier.size(10.dp)
-                                )
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text(
-                                    text = "LIBÉRER",
-                                    color = CyanAccent,
-                                    fontSize = 9.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold
-                                )
+                            // Bouton horizontal compact Libérer (Jalon 2.2.1 - Exigence 1)
+                            if (perceptionState.isLocked) {
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .defaultMinSize(minWidth = 84.dp, minHeight = 48.dp)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(CyanAccent.copy(alpha = 0.20f))
+                                        .border(1.dp, CyanAccent, RoundedCornerShape(20.dp))
+                                        .clickable { viewModel.unlockSubject() }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                        .testTag("unlock_subject_button"),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.LockOpen,
+                                        contentDescription = "Libérer le sujet",
+                                        tint = CyanAccent,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text(
+                                        text = "Libérer",
+                                        color = CyanAccent,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
                             }
                         }
                     }
-
-                    // Télémétrie diagnostique locale HUD (si activée ou en mode Diagnostic)
-                    AnimatedVisibility(
-                        visible = settings.showDiagnostics || perceptionState.displayMode == DetectionDisplayMode.DIAGNOSTIC,
-                        enter = fadeIn(),
-                        exit = fadeOut(),
-                        modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .padding(top = 6.dp)
-                    ) {
-                        DetectionDiagnosticsHUD(diagnostics = diagnostics)
-                    }
                 }
 
-                // Partie inférieure : commandes du Mode Guidé + Zoom + Déclencheur
+                // Partie inférieure : Feuille diagnostique repliable + commandes du Mode Guidé + Zoom + Déclencheur
                 Column(modifier = Modifier.fillMaxWidth()) {
+                    // Feuille diagnostique repliable en bas d'écran (Jalon 2.2.1 - Exigence 4)
+                    if (settings.showDiagnostics || perceptionState.displayMode == DetectionDisplayMode.DIAGNOSTIC) {
+                        DiagnosticBottomSheet(
+                            diagnostics = diagnostics,
+                            detectedObjects = perceptionState.detectedObjects,
+                            onSelectSubject = { viewModel.selectSubject(it) },
+                            onUnlockSubject = { viewModel.unlockSubject() }
+                        )
+                    }
+
                     // Zoom quick pill
                     Row(
                         modifier = Modifier
@@ -521,6 +534,22 @@ fun CameraScreen(
                 photoUri = uiState.activeViewerUri,
                 onDismiss = { viewModel.closeViewer() }
             )
+
+            // Dialogue d'inspection diagnostique de tous les objets détectés (Jalon 2.2)
+            if (showDetectionDetailsDialog) {
+                DetectionDetailsDialog(
+                    detectedObjects = perceptionState.detectedObjects,
+                    onSelectSubject = {
+                        viewModel.selectSubject(it)
+                        showDetectionDetailsDialog = false
+                    },
+                    onUnlockSubject = {
+                        viewModel.unlockSubject()
+                        showDetectionDetailsDialog = false
+                    },
+                    onDismiss = { showDetectionDetailsDialog = false }
+                )
+            }
         }
     }
 }
